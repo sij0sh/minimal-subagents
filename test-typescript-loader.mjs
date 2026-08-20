@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
+import { dirname, join, resolve as resolvePath } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -28,12 +28,9 @@ function packageRootFromModule(value) {
   return candidate;
 }
 
-function firstPackageRoot(candidates) {
-  for (const candidate of candidates) {
-    if (candidate && existsSync(join(candidate, "package.json"))) return candidate;
-  }
-  return candidates.find(Boolean);
-}
+const firstPackageRoot = (candidates) => candidates.find(
+  (candidate) => candidate && existsSync(join(candidate, "package.json")),
+);
 
 // Pi installs user packages below the configured agent directory. Resolve all
 // test imports from that directory so the loader works on either OS. The
@@ -41,7 +38,6 @@ function firstPackageRoot(candidates) {
 // and sources inside this repository get the .js -> .ts rewrite.
 const REPO_ROOT = dirname(fileURLToPath(import.meta.url));
 const AGENT_ROOT = resolvePath(expandPath(process.env.PI_CODING_AGENT_DIR, join(homedir(), ".pi", "agent")));
-const EXTENSIONS_ROOT = resolvePath(join(AGENT_ROOT, "extensions"));
 const globalRoot = npmGlobalRoot();
 const nodeInstallRoot = resolvePath(join(dirname(dirname(process.execPath)), "lib", "node_modules"));
 const PI_CODING_AGENT_ROOT = firstPackageRoot([
@@ -49,6 +45,9 @@ const PI_CODING_AGENT_ROOT = firstPackageRoot([
   join(REPO_ROOT, "node_modules", "@earendil-works", "pi-coding-agent"),
   join(AGENT_ROOT, "npm", "node_modules", "@earendil-works", "pi-coding-agent"),
   globalRoot && join(globalRoot, "@earendil-works", "pi-coding-agent"),
+  // npm.cmd cannot be spawned without a shell on Windows, so npmGlobalRoot()
+  // fails there; %APPDATA%\\npm\\node_modules is the standard global root.
+  process.env.APPDATA && join(process.env.APPDATA, "npm", "node_modules", "@earendil-works", "pi-coding-agent"),
   join(dirname(process.execPath), "node_modules", "@earendil-works", "pi-coding-agent"),
   join(nodeInstallRoot, "@earendil-works", "pi-coding-agent"),
 ]);
@@ -62,14 +61,18 @@ if (!PI_AI_ROOT) throw new Error("Could not locate @earendil-works/pi-ai next to
 const PI_AI_DIST = `${pathToFileURL(join(PI_AI_ROOT, "dist")).href}/`;
 const PI_CODING_AGENT_DIST = `${pathToFileURL(join(PI_CODING_AGENT_ROOT, "dist")).href}/`;
 const firstExisting = (candidates) => candidates.find((candidate) => existsSync(candidate));
-const TYPEBOX = pathToFileURL(firstExisting([
+const typeboxPath = firstExisting([
   join(PI_CODING_AGENT_ROOT, "node_modules", "typebox", "build", "index.mjs"),
   join(REPO_ROOT, "node_modules", "typebox", "build", "index.mjs"),
-]) ?? join(PI_CODING_AGENT_ROOT, "node_modules", "typebox", "build", "index.mjs")).href;
-const YAML = pathToFileURL(firstExisting([
+]);
+if (!typeboxPath) throw new Error("Could not locate typebox");
+const TYPEBOX = pathToFileURL(typeboxPath).href;
+const yamlPath = firstExisting([
   join(PI_CODING_AGENT_ROOT, "node_modules", "yaml", "dist", "index.js"),
   join(REPO_ROOT, "node_modules", "yaml", "dist", "index.js"),
-]) ?? join(PI_CODING_AGENT_ROOT, "node_modules", "yaml", "dist", "index.js")).href;
+]);
+if (!yamlPath) throw new Error("Could not locate yaml");
+const YAML = pathToFileURL(yamlPath).href;
 
 
 
