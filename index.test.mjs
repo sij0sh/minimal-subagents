@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const extensionModule = await import("./index.ts");
-const { buildChildArgs, getPiInvocation, reduceJsonLine, truncateToolOutput } = extensionModule;
+const { buildChildArgs, getPiInvocation, reduceJsonLine, truncateToolOutput, HANDOFF_CONTRACT } = extensionModule;
 
 const assistantEvent = (overrides = {}) => JSON.stringify({
   type: "message_end",
@@ -100,12 +100,12 @@ test("fallback invocation runs the installed CLI script, not the `pi` shim", () 
   }
 });
 
-test("child args inherit parent model, thinking, and tools and exclude subagent", () => {
+test("child args inherit parent model, thinking, and tools and exclude subagent and compress", () => {
   const args = buildChildArgs(
-    { model: "provider/model", thinking: "medium", tools: ["read", "subagent", "custom_tool"] },
+    { model: "provider/model", thinking: "medium", tools: ["read", "subagent", "compress", "custom_tool"] },
   );
   assert.deepEqual(args.slice(0, 8), [
-    "--mode", "json", "-p", "--no-session", "--no-skills", "--no-prompt-templates", "--exclude-tools", "subagent",
+    "--mode", "json", "-p", "--no-session", "--no-skills", "--no-prompt-templates", "--exclude-tools", "subagent,compress",
   ]);
   assert.equal(args[args.indexOf("--tools") + 1], "read,custom_tool");
   assert.equal(args[args.indexOf("--model") + 1], "provider/model");
@@ -181,10 +181,9 @@ test("clears retry errors and includes tool-result usage", () => {
   );
 });
 
-test("truncates visible output without writing a durable artifact", () => {
+test("truncates the handoff to the internal ceiling without writing a durable artifact", () => {
   const output = truncateToolOutput("x".repeat(60 * 1024));
-  assert.ok(Buffer.byteLength(output, "utf8") <= 50 * 1024);
-  assert.ok(output.split("\n").length <= 2_000);
+  assert.ok(Buffer.byteLength(output, "utf8") <= 16_000);
   assert.match(output, /\[Output truncated\]$/);
 });
 
@@ -197,7 +196,7 @@ test("registers a parallel subagent tool with a pinned task", () => {
   assert.deepEqual(Object.keys(tool.parameters.properties), ["task"]);
   assert.deepEqual(tool.renderCall().render(80), ["Subagent"]);
   assert.deepEqual(tool.renderCall({ task: "inspect files" }).render(80), ["Subagent", "Task: inspect files"]);
-  assert.match(tool.promptGuidelines.join("\n"), /independent, non-overlapping tasks/);
+  assert.match(tool.promptGuidelines.join("\n"), /context boundary/);
 });
 
 test("runs a long task through child stdin", async () => {
@@ -212,7 +211,7 @@ test("runs a long task through child stdin", async () => {
       (update) => updates.push(update),
       { cwd },
     );
-    const expectedInput = `Task: ${task}`;
+    const expectedInput = `${HANDOFF_CONTRACT}\n\nTask: ${task}`;
     assert.equal(await readFile(join(cwd, "received-task"), "utf8"), expectedInput);
     const childArgs = JSON.parse(await readFile(join(cwd, "received-args"), "utf8"));
     assert.ok(!childArgs.includes(expectedInput));
@@ -238,7 +237,7 @@ test("reports a bounded child diagnostic", async () => {
         return true;
       },
     );
-    assert.equal(await readFile(join(cwd, "received-task"), "utf8"), "Task: failure task");
+    assert.equal(await readFile(join(cwd, "received-task"), "utf8"), `${HANDOFF_CONTRACT}\n\nTask: failure task`);
   });
 });
 

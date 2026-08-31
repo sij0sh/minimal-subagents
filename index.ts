@@ -4,8 +4,6 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
-  DEFAULT_MAX_BYTES,
-  DEFAULT_MAX_LINES,
   truncateHead,
   truncateTail,
 } from "@earendil-works/pi-coding-agent";
@@ -18,6 +16,13 @@ const STDERR_MAX_LINES = 100;
 const CHILD_ENV = "PI_MINIMAL_SUBAGENTS_CHILD";
 const TRUNCATION_NOTICE = "[Output truncated]";
 const TOOL_LABEL = "Subagent";
+// ~4k tokens; part of what `subagent` means, so not configurable.
+const HANDOFF_MAX_BYTES = 16_000;
+export const HANDOFF_CONTRACT =
+  "Your final response is a handoff to another coding agent, not a transcript of your work. " +
+  "Return only the information it needs to continue: conclusions, precise file/symbol locations, " +
+  "material command or test outcomes, recommended next actions, and unresolved uncertainty. " +
+  "Omit exploratory output, dead ends, routine successful output, and source text that the parent can read directly if needed.";
 
 export type ChildState = {
   output: string;
@@ -83,12 +88,14 @@ function addUsage(target: Usage, value: unknown): void {
   if (usage.reasoning !== undefined) target.reasoning = (target.reasoning ?? 0) + number(usage.reasoning);
 }
 
+const CHILD_EXCLUDED_TOOLS = ["subagent", "compress"];
+
 export function buildChildArgs(defaults: DispatchDefaults): string[] {
   const args = [
     "--mode", "json", "-p", "--no-session", "--no-skills", "--no-prompt-templates",
-    "--exclude-tools", "subagent",
+    "--exclude-tools", CHILD_EXCLUDED_TOOLS.join(","),
   ];
-  const tools = defaults.tools?.filter((tool) => tool !== "subagent");
+  const tools = defaults.tools?.filter((tool) => !CHILD_EXCLUDED_TOOLS.includes(tool));
   if (tools !== undefined) {
     if (tools.length) args.push("--tools", tools.join(","));
     else args.push("--no-tools");
@@ -135,11 +142,13 @@ export function reduceJsonLine(state: ChildState, line: string): void {
 }
 
 export function truncateToolOutput(output: string): string {
-  const truncated = truncateHead(output, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
+  // A handoff has one byte budget; the line limit stays out of the way.
+  const limits = { maxLines: Number.MAX_SAFE_INTEGER, maxBytes: HANDOFF_MAX_BYTES };
+  const truncated = truncateHead(output, limits);
   if (!truncated.truncated) return truncated.content;
   const visible = truncateHead(output, {
-    maxLines: Math.max(1, DEFAULT_MAX_LINES - 2),
-    maxBytes: Math.max(1, DEFAULT_MAX_BYTES - Buffer.byteLength(TRUNCATION_NOTICE, "utf8") - 2),
+    maxLines: Number.MAX_SAFE_INTEGER,
+    maxBytes: Math.max(1, HANDOFF_MAX_BYTES - Buffer.byteLength(TRUNCATION_NOTICE, "utf8") - 2),
   }).content;
   return `${visible}\n\n${TRUNCATION_NOTICE}`;
 }
@@ -257,7 +266,8 @@ async function runChild(
         reject(error);
       }
     });
-    proc.stdin?.end(`Task: ${task}`);
+    // Fixed contract prefix keeps the child prompt cache-stable; the task stays last.
+    proc.stdin?.end(`${HANDOFF_CONTRACT}\n\nTask: ${task}`);
     if (signal) {
       if (signal.aborted) abort();
       else signal.addEventListener("abort", abort, { once: true });
@@ -275,7 +285,7 @@ export default function minimalSubagents(pi: ExtensionAPI): void {
     description: "Delegate self-contained, independent tasks to child sessions for isolated context or parallel execution.",
     promptSnippet: "Delegate independent work to child sessions",
     promptGuidelines: [
-      "Use separate subagents only for independent, non-overlapping tasks that benefit from isolated context or parallel execution. Make each task self-contained.",
+      "Use `subagent` as a context boundary. Delegate investigation when this session needs the findings rather than the intermediate reads, searches, or command output. Use tools directly when their exact output is needed here to take the next action, especially to obtain fresh source for editing.",
     ],
     executionMode: "parallel",
     parameters: Type.Object({
@@ -294,7 +304,7 @@ export default function minimalSubagents(pi: ExtensionAPI): void {
         {
           model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined,
           thinking: ctx.thinkingLevel,
-          tools: pi.getActiveTools().filter((name) => name !== "subagent"),
+          tools: pi.getActiveTools().filter((name) => !CHILD_EXCLUDED_TOOLS.includes(name)),
         },
         params.task,
         signal,
