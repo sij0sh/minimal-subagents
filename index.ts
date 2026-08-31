@@ -285,7 +285,7 @@ export default function minimalSubagents(pi: ExtensionAPI): void {
     description: "Delegate self-contained, independent tasks to child sessions for isolated context or parallel execution.",
     promptSnippet: "Delegate independent work to child sessions",
     promptGuidelines: [
-      "Use `subagent` as a context boundary. Delegate investigation when this session needs the findings rather than the intermediate reads, searches, or command output. Use tools directly when their exact output is needed here to take the next action, especially to obtain fresh source for editing.",
+      "Delegate independent subtasks that can be self-contained to subagents.",
     ],
     executionMode: "parallel",
     parameters: Type.Object({
