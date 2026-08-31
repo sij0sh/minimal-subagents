@@ -16,10 +16,12 @@ It is deliberately small. The tool takes one parameter, `task`, and returns the 
 Each subagent call spawns a headless `pi` process with:
 
 * the current session's model and thinking level
-* the same tools as the parent, minus `subagent` itself, so subagents cannot spawn subagents
-* no session persistence, skills, or prompt templates
+* the same tools as the parent, minus `subagent` and `compress`, so subagents cannot recurse or compact a disposable worker
+* no session persistence, skills, or prompt templates, so each child starts clean and never inherits parent history
 
-The task is passed on stdin. Output streams back to the parent while the child runs, and the child's token usage is credited to the parent session. Aborting the call kills the child process tree.
+Every child prompt starts with a fixed handoff contract: the child's final message is a handoff to the parent, not a transcript of its work. Exploratory output, dead ends, and raw source stay in the child. The task follows the contract, keeping the child's prompt prefix stable.
+
+The contract-prefixed task is passed on stdin. The returned handoff is capped at roughly 4k tokens (~16 KB) with no configuration. Output streams back to the parent while the child runs, and the child's token usage is credited to the parent session. Aborting the call kills the child process tree.
 
 ## Install
 
