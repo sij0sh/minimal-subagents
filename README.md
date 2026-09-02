@@ -181,12 +181,25 @@ There is no session persistence, agent hierarchy, difficulty selector, planning 
 
 ## Install
 
-Clone the repository into Pi's extensions directory and install dependencies:
+```sh
+pi install git:github.com/sij0sh/minimal-subagents
+```
 
-```sh id="6xe5o7"
-git clone https://github.com/sij0sh/minimal-subagents.git ~/.pi/agent/extensions/minimal-subagents
-cd ~/.pi/agent/extensions/minimal-subagents
-npm install
+Pi clones the package, installs dependencies, and loads the extension on the
+next start.
+
+Update:
+
+```sh
+pi update git:github.com/sij0sh/minimal-subagents
+```
+
+`pi update --extensions` updates all installed packages at once.
+
+Uninstall:
+
+```sh
+pi remove git:github.com/sij0sh/minimal-subagents
 ```
 
 Restart Pi, then ask it to delegate a self-contained task to a subagent.
